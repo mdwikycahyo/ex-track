@@ -1,4 +1,4 @@
-const CACHE = "ex-track-v2";
+const CACHE = "ex-track-v3";
 const FILES = ["./", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png", "icons/favicon-32.png"];
 
 self.addEventListener("install", event => {

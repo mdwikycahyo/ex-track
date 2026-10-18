@@ -74,7 +74,9 @@
     .row .num, .cat .num { font-weight: 600; }
     .empty { padding: 40px 0; text-align: center; font-size: 14px; color: var(--mute); }
 
-    .amt { padding: 4px 4px 8px; text-align: right; font-size: 40px; font-weight: 700; white-space: nowrap; }
+    .amt { display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; padding: 4px 4px 8px; font-size: 40px; font-weight: 700; white-space: nowrap; }
+    .expr { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-weight: 500; color: var(--mute); }
+    .expr:empty { display: none; }
     .amt span { margin-right: 6px; font-size: 20px; color: var(--mute); }
     .amt b { display: inline-block; padding: 0 4px; border-radius: 8px; transition: background .15s; }
     .amt b::after { content: ""; display: inline-block; width: 3px; height: .9em; margin-left: 3px; vertical-align: -.08em; border-radius: 2px; background: var(--accent); animation: blink 1s steps(1) infinite; }
@@ -90,8 +92,11 @@
     .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .pad button { height: 54px; border-radius: 14px; background: var(--key); text-align: center; font-size: 24px; font-weight: 500; transition: transform .08s, background .08s; }
     .pad button:active { background: var(--key-press); }
+    .pad .plus { background: var(--accent-soft); color: var(--accent); font-size: 28px; }
+    .pad .plus:active { background: rgba(61, 220, 151, .3); }
     .pad .go { grid-column: span 3; background: var(--accent); color: var(--ink); font-size: 18px; font-weight: 700; }
     .pad .go:disabled { opacity: .35; }
+    .pad .plus + .go { grid-column: span 2; }
     .chip:active, .pad button:active, .pill:active, .summary:active .stats { transform: scale(.96); }
 
     .entry, .sheet { background: var(--card); border-radius: 22px 22px 0 0; }
@@ -109,7 +114,7 @@
     .scrim.show { opacity: 1; pointer-events: auto; }
     .sheet.show { transform: none; }
     .sheet h2 { margin: 2px 0 4px; text-align: center; font-size: 15px; font-weight: 600; color: var(--mute); }
-    .sheet .amt { padding: 12px 0 16px; text-align: center; font-size: 48px; }
+    .sheet .amt { justify-content: center; padding: 12px 0 16px; font-size: 48px; }
     .delete { width: 100%; height: 48px; margin-top: 8px; text-align: center; color: var(--warn); font-weight: 600; }
 
     .breakdown { max-height: 80dvh; display: flex; flex-direction: column; }
@@ -255,23 +260,27 @@
       return `${d % 100} ${MONTHS[Math.floor(d / 100) % 100 - 1].slice(0, 3)}`;
     }
 
-    function AmountEditor(root, { withCategories = true, action = "Save", onSubmit }) {
-      const blank = () => ({ input: "", cat: "Food", name: "", fresh: false, original: null });
+    function AmountEditor(root, { withCategories = true, withPlus = withCategories, action = "Save", onSubmit }) {
+      const blank = () => ({ input: "", terms: [], cat: "Food", name: "", fresh: false, original: null });
       const s = blank();
-      const snapshot = () => JSON.stringify([s.input, s.cat, s.cat === "Other" ? s.name.trim() : ""]);
+      const total = () => s.terms.reduce((a, b) => a + b, 0) + (+s.input || 0);
+      const snapshot = () => JSON.stringify([total(), s.cat, s.cat === "Other" ? s.name.trim() : ""]);
 
       root.innerHTML =
         (withCategories ? `<input class="other-name" placeholder="What was it? e.g. Parking" maxlength="24" aria-label="Expense name">` : "") +
-        `<p class="amt num"><span>Rp</span><b>0</b></p>` +
+        `<p class="amt num"><small class="expr"></small><span>Rp</span><b>0</b></p>` +
         (withCategories ? `<div class="chips">${CATEGORIES.map(([e, name]) => `<button class="chip" data-cat="${name}">${e} ${name}</button>`).join("")}</div>` : "") +
-        `<div class="pad">${KEYS.map(k => `<button data-key="${k}">${k}</button>`).join("")}<button class="go">${action}</button></div>`;
+        `<div class="pad">${KEYS.map(k => `<button data-key="${k}">${k}</button>`).join("")}${withPlus ? `<button class="plus" data-key="+" aria-label="Add another amount">+</button>` : ""}<button class="go">${action}</button></div>`;
 
-      const amount = root.querySelector(".amt"), value = amount.querySelector("b");
+      const amount = root.querySelector(".amt"), value = amount.querySelector("b"), expr = amount.querySelector(".expr");
       const submit = root.querySelector(".go"), nameInput = root.querySelector(".other-name");
 
       function paint() {
-        value.textContent = fmt(+s.input || 0);
-        submit.disabled = !+s.input || s.original === snapshot();
+        const adding = s.terms.length > 0;
+        value.textContent = fmt(adding ? +s.input || 0 : total());
+        expr.textContent = adding ? `${s.terms.length > 3 ? "… + " : ""}${s.terms.slice(-3).map(fmt).join(" + ")} +` : "";
+        submit.textContent = adding ? `${action} · ${fmt(total())}` : action;
+        submit.disabled = !total() || s.original === snapshot();
         root.classList.toggle("fresh", s.fresh);
         root.classList.toggle("other", s.cat === "Other");
         root.querySelectorAll(".chip").forEach(chip => chip.classList.toggle("on", chip.dataset.cat === s.cat));
@@ -279,10 +288,16 @@
       }
 
       function type(key) {
-        if (s.fresh && key !== "⌫") s.input = "";
+        if (key === "+") {
+          if (+s.input) s.terms.push(+s.input);
+          s.input = "";
+        } else if (key === "⌫") {
+          s.input = s.input === "" && s.terms.length ? String(s.terms.pop()) : s.input.slice(0, -1);
+        } else {
+          if (s.fresh) s.input = "";
+          if ((s.input + key).length <= 10 && !(s.input === "" && key.startsWith("0"))) s.input += key;
+        }
         s.fresh = false;
-        if (key === "⌫") s.input = s.input.slice(0, -1);
-        else if ((s.input + key).length <= 10 && !(s.input === "" && key.startsWith("0"))) s.input += key;
         amount.classList.remove("bump");
         void amount.offsetWidth;
         amount.classList.add("bump");
@@ -293,7 +308,7 @@
         if (!button) return;
         vibrate();
         nameInput?.blur();
-        if (button === submit) return onSubmit(s);
+        if (button === submit) return onSubmit({ ...s, amount: total() });
         type(button.dataset.key);
         paint();
       });
@@ -316,11 +331,16 @@
       paint();
       return {
         reset() { Object.assign(s, blank()); paint(); },
-        load(values) { Object.assign(s, values, { fresh: true }); s.original = snapshot(); paint(); }
+        load(values) {
+          Object.assign(s, blank(), values, { fresh: true });
+          s.original = snapshot();
+          paint();
+          root.querySelector(".chip.on")?.scrollIntoView({ block: "nearest", inline: "center" });
+        }
       };
     }
 
-    const entryFields = s => ({ a: +s.input, c: s.cat, n: s.cat === "Other" ? s.name.trim() : "" });
+    const entryFields = s => ({ a: s.amount, c: s.cat, n: s.cat === "Other" ? s.name.trim() : "" });
 
     const logger = AmountEditor($("logEditor"), {
       onSubmit(s) {
@@ -353,7 +373,7 @@
       withCategories: false,
       action: "Set budget",
       onSubmit(s) {
-        budget = +s.input;
+        budget = s.amount;
         try { localStorage.budget = budget; } catch {}
         undoAction = null;
         closeSheets();
